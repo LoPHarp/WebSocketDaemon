@@ -17,18 +17,19 @@ public:
     ~PushServer();
 
 private slots:
-    void onNewConnection();
-    void socketDisconnected();
-    void processIncomingMessage(const QString& message);
     void sendPings();
     void onSslErrors(const QList<QSslError>& errors);
+    void onNewConnection();
+    void processIncomingMessage(const QString& message);
+    void socketDisconnected();
+
 
 private:
-    void ServerPushToUser(int targetUserId, const QString& message);
-    void UserPushToAllUsers(int senderId, const QString& message);
+    void UserPushToAllUsers(const QString& senderId, const QString& message);
+    void ServerPushToUserOrRole(const QString& targetIdOrRole, const QString& message);
 
     QWebSocketServer* m_pWebSocketServer;
-    std::unordered_map<int, QWebSocket*> m_clients;
+    std::unordered_map<QString, QList<QWebSocket*>> m_clients;
     QTimer* m_pingTimer;
 };
 

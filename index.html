@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="uk">
 <head>
     <meta charset="UTF-8">
-    <title>Push Client (JSON)</title>
+    <title>WSS Push Client (Roles)</title>
     <style>
         body { font-family: Arial, sans-serif; background-color: #1e1e1e; color: #d4d4d4; padding: 20px; }
         #chat { border: 1px solid #333; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; background-color: #252526; }
@@ -17,19 +17,23 @@
     <div id="chat"></div>
     
     <div style="display: flex;">
-        <input type="text" id="targetsInput" placeholder="Target IDs (напр: 200, 305) або пусто для всіх" style="width: 35%;">
-        <input type="text" id="messageInput" placeholder="Enter message..." style="width: 50%;">
-        <button onclick="sendMessage()">Send</button>
+        <input type="text" id="rolesInput" placeholder="Одержувачі (напр: dispetcher_, admin)" style="width: 35%;">
+        <input type="text" id="messageInput" placeholder="Текст заявки..." style="width: 50%;">
+        <button onclick="sendMessage()">Send Zayavka</button>
     </div>
 
     <script>
-        let myId = prompt("Введіть ваш ID (тільки цифри):", Math.floor(Math.random() * 1000));
-        document.getElementById("header").innerText = "Push Client (ID: " + myId + ")";
+        let myRole = prompt("Введіть ваш Нік або Роль (напр. dispetcher_):", "dispetcher_");
+        document.getElementById("header").innerText = "WSS Client (Роль: " + myRole + ")";
 
-        const ws = new WebSocket("ws://127.0.0.1:8080/?id=" + myId);
+        const ws = new WebSocket("ws://127.0.0.1:8080/?id=" + myRole);
 
         ws.onopen = () => {
-            document.getElementById("chat").innerHTML += "<p style='color: #4CAF50;'>[System] Connected to C++ Server!</p>";
+            document.getElementById("chat").innerHTML += "<p style='color: #4CAF50;'>[System] Securely Connected to C++ Server!</p>";
+        };
+
+        ws.onerror = (error) => {
+            document.getElementById("chat").innerHTML += "<p style='color: #ff3333;'>[System Error] З'єднання відхилено. Можливо, браузер блокує самопідписаний сертифікат WSS.</p>";
         };
 
         ws.onmessage = (event) => {
@@ -40,23 +44,27 @@
 
         function sendMessage() {
             const textInput = document.getElementById("messageInput");
-            const targetsInput = document.getElementById("targetsInput");
+            const rolesInput = document.getElementById("rolesInput");
             
             if (textInput.value) {
-                let payload = { text: textInput.value };
-                let targetsStr = targetsInput.value.trim();
+                let rolesStr = rolesInput.value.trim();
+                let targetRoles = rolesStr.split(',').map(r => r.trim()).filter(r => r.length > 0);
 
-                if (targetsStr === "") {
-                    payload.action = "broadcast";
-                } else {
-                    payload.action = "send_to_group";
-                    payload.targets = targetsStr.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+                let payload = {
+                    action: targetRoles.length > 0 ? "insert_zayavka" : "broadcast",
+                    id_action: Math.floor(Math.random() * 1000),
+                    content: textInput.value,
+                    author: myRole
+                };
+
+                if (targetRoles.length > 0) {
+                    payload.user = targetRoles;
                 }
 
                 ws.send(JSON.stringify(payload));
                 
                 const chat = document.getElementById("chat");
-                let toWho = (payload.action === "broadcast") ? "to All" : "to [" + payload.targets.join(", ") + "]";
+                let toWho = targetRoles.length > 0 ? "to [" + targetRoles.join(", ") + "]" : "to All";
                 chat.innerHTML += "<p><b>You (" + toWho + "):</b> " + textInput.value + "</p>";
                 chat.scrollTop = chat.scrollHeight;
                 
