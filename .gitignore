@@ -1,0 +1,40 @@
+# C++ objects and binaries
+*.slo
+*.lo
+*.o
+*.obj
+*.suo
+*.tlog
+*.ilk
+*.meta
+*.pch
+*.exp
+
+# Qt-specific
+.qmake.stash
+*.pro.user
+*.pro.user.*
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+Makefile*
+*build-*
+build/
+.qtcreator/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# CMake specific
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# User-specific files
+all_in_one.txt
