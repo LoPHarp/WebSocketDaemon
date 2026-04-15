@@ -10,12 +10,16 @@
 using namespace std;
 
 PushServer::PushServer(quint16 port, QObject *parent) : QObject(parent),
-    m_pWebSocketServer(new QWebSocketServer(QStringLiteral("Push Server"), QWebSocketServer::NonSecureMode, this))
+    m_pWebSocketServer(new QWebSocketServer(QStringLiteral("Push Server"), QWebSocketServer::NonSecureMode, this)),
+    m_pingTimer(new QTimer(this))
 {
     if (m_pWebSocketServer->listen(QHostAddress::Any, port))
         qDebug() << "Server listening on port " << port;
 
     connect(m_pWebSocketServer, &QWebSocketServer::newConnection, this, &PushServer::onNewConnection);
+
+    connect(m_pingTimer, &QTimer::timeout, this, &PushServer::sendPings);
+    m_pingTimer->start(GlobalConfig::PING_INTERVAL_MS);
 }
 
 PushServer::~PushServer()
@@ -23,6 +27,12 @@ PushServer::~PushServer()
     m_pWebSocketServer->close();
     for (auto& [id, socket] : m_clients)
         socket->deleteLater();
+}
+
+void PushServer::sendPings()
+{
+    for (auto& [id, socket] : m_clients)
+        socket->ping();
 }
 
 void PushServer::onNewConnection()
@@ -55,6 +65,13 @@ void PushServer::processIncomingMessage(const QString& message)
 {
     QWebSocket* pSender = qobject_cast<QWebSocket*>(sender());
     if (!pSender) return;
+
+    if (message.length() > GlobalConfig::MAX_PAYLOAD_SIZE)
+    {
+        qDebug() << "SECURITY ALERT: Payload too large from user" << pSender->property("userId").toInt() << ". Dropping connection.";
+        pSender->close();
+        return;
+    }
 
     int senderId = pSender->property("userId").toInt();
 

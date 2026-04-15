@@ -6,6 +6,7 @@
 #include <QWebSocket>
 #include <unordered_set>
 #include <QUrlQuery>
+#include <QTimer>
 
 class PushServer : public QObject
 {
@@ -21,10 +22,13 @@ private slots:
     void onNewConnection();
     void socketDisconnected();
     void processIncomingMessage(const QString& message);
+    void sendPings();
 
 private:
     QWebSocketServer* m_pWebSocketServer;
     std::unordered_map<int, QWebSocket*> m_clients;
+
+    QTimer* m_pingTimer;
 };
 
 #endif // PUSHSERVER_H
