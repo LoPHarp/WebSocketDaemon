@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Push Client</title>
+    <title>Push Client (JSON)</title>
     <style>
         body { font-family: Arial, sans-serif; background-color: #1e1e1e; color: #d4d4d4; padding: 20px; }
         #chat { border: 1px solid #333; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; background-color: #252526; }
-        input { padding: 10px; width: 70%; background-color: #3c3c3c; border: none; color: white; }
+        input { padding: 10px; background-color: #3c3c3c; border: none; color: white; margin-right: 5px;}
         button { padding: 10px 20px; background-color: #0e639c; color: white; border: none; cursor: pointer; }
         button:hover { background-color: #1177bb; }
     </style>
@@ -16,15 +16,16 @@
     <h2 id="header">Connecting...</h2>
     <div id="chat"></div>
     
-    <input type="text" id="messageInput" placeholder="Enter message...">
-    <button onclick="sendMessage()">Send</button>
+    <div style="display: flex;">
+        <input type="text" id="targetsInput" placeholder="Target IDs (напр: 200, 305) або пусто для всіх" style="width: 35%;">
+        <input type="text" id="messageInput" placeholder="Enter message..." style="width: 50%;">
+        <button onclick="sendMessage()">Send</button>
+    </div>
 
     <script>
-        // 1. Спрашиваем ID у пользователя при открытии страницы
-        let myId = prompt("Введите ваш ID (только цифры):", Math.floor(Math.random() * 1000));
+        let myId = prompt("Введіть ваш ID (тільки цифри):", Math.floor(Math.random() * 1000));
         document.getElementById("header").innerText = "Push Client (ID: " + myId + ")";
 
-        // 2. Подключаемся к C++ демону, передавая ID в ссылке
         const ws = new WebSocket("ws://127.0.0.1:8080/?id=" + myId);
 
         ws.onopen = () => {
@@ -33,28 +34,35 @@
 
         ws.onmessage = (event) => {
             const chat = document.getElementById("chat");
-            chat.innerHTML += "<p style='color: #ffcc00;'><b>Incoming Push:</b> " + event.data + "</p>";
+            chat.innerHTML += "<p style='color: #ffcc00;'><b>Incoming:</b> " + event.data + "</p>";
             chat.scrollTop = chat.scrollHeight;
         };
 
-        ws.onclose = () => {
-            document.getElementById("chat").innerHTML += "<p style='color: #f44336;'>[System] Connection closed/rejected by server.</p>";
-        };
-
         function sendMessage() {
-            const input = document.getElementById("messageInput");
-            if (input.value) {
-                ws.send(input.value);
+            const textInput = document.getElementById("messageInput");
+            const targetsInput = document.getElementById("targetsInput");
+            
+            if (textInput.value) {
+                let payload = { text: textInput.value };
+                let targetsStr = targetsInput.value.trim();
+
+                if (targetsStr === "") {
+                    payload.action = "broadcast";
+                } else {
+                    payload.action = "send_to_group";
+                    payload.targets = targetsStr.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+                }
+
+                ws.send(JSON.stringify(payload));
                 
-                // Отображаем сообщение у себя в чате
                 const chat = document.getElementById("chat");
-                chat.innerHTML += "<p><b>You:</b> " + input.value + "</p>";
+                let toWho = (payload.action === "broadcast") ? "to All" : "to [" + payload.targets.join(", ") + "]";
+                chat.innerHTML += "<p><b>You (" + toWho + "):</b> " + textInput.value + "</p>";
                 chat.scrollTop = chat.scrollHeight;
                 
-                input.value = "";
+                textInput.value = "";
             }
         }
     </script>
-
 </body>
 </html>

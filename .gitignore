@@ -38,3 +38,6 @@ compile_commands.json
 
 # User-specific files
 all_in_one.txt
+
+# VS Code specific
+.vs/

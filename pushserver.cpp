@@ -2,6 +2,10 @@
 #include "GlobalSettings.h"
 
 #include <QDebug>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QJsonArray>
 
 using namespace std;
 
@@ -54,7 +58,38 @@ void PushServer::processIncomingMessage(const QString& message)
 
     int senderId = pSender->property("userId").toInt();
 
-    UserPushToAllUsers(senderId, message);
+    QJsonParseError parseError;
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(message.toUtf8(), &parseError);
+
+    if(parseError.error != QJsonParseError::NoError || !jsonDoc.isObject())
+    {
+        qDebug() << "JSON Parse Error from user" << senderId << ":" << parseError.errorString();
+        return;
+    }
+
+    QJsonObject jsonObj = jsonDoc.object();
+    QString action = jsonObj["action"].toString();
+
+    if (action == "broadcast")
+    {
+        QString text = jsonObj["text"].toString();
+        UserPushToAllUsers(senderId, text);
+    }
+    else if (action == "send_to_group")
+    {
+        QJsonArray targetsArray = jsonObj["targets"].toArray();
+        QString text = jsonObj["text"].toString();
+        QString formattedText = QString("[Group Msg from %1]: %2").arg(senderId).arg(text);
+
+        for (int i = 0; i < targetsArray.size(); ++i)
+        {
+            int targetId = targetsArray[i].toInt();
+            ServerPushToUser(targetId, formattedText);
+        }
+        qDebug() << "Routed group message from" << senderId << "to" << targetsArray.size() << "users";
+    }
+    else
+        qDebug() << "Unknown action received:" << action;
 }
 
 void PushServer::UserPushToAllUsers(int senderId, const QString& message)
