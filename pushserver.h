@@ -4,9 +4,10 @@
 #include <QObject>
 #include <QWebSocketServer>
 #include <QWebSocket>
-#include <unordered_set>
-#include <QUrlQuery>
 #include <QTimer>
+#include <QSslError>
+#include <unordered_map>
+#include <QUrlQuery>
 
 class PushServer : public QObject
 {
@@ -15,19 +16,19 @@ public:
     explicit PushServer(quint16 port, QObject *parent = nullptr);
     ~PushServer();
 
-    void ServerPushToUser(int targetUserId, const QString& message);
-    void UserPushToAllUsers(int senderId, const QString& message);
-
 private slots:
     void onNewConnection();
     void socketDisconnected();
     void processIncomingMessage(const QString& message);
     void sendPings();
+    void onSslErrors(const QList<QSslError>& errors);
 
 private:
+    void ServerPushToUser(int targetUserId, const QString& message);
+    void UserPushToAllUsers(int senderId, const QString& message);
+
     QWebSocketServer* m_pWebSocketServer;
     std::unordered_map<int, QWebSocket*> m_clients;
-
     QTimer* m_pingTimer;
 };
 

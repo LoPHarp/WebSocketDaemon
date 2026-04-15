@@ -6,13 +6,38 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QJsonArray>
+#include <QFile>
+#include <QSslCertificate>
+#include <QSslKey>
+#include <QSslConfiguration>
 
 using namespace std;
 
 PushServer::PushServer(quint16 port, QObject *parent) : QObject(parent),
-    m_pWebSocketServer(new QWebSocketServer(QStringLiteral("Push Server"), QWebSocketServer::NonSecureMode, this)),
+    m_pWebSocketServer(new QWebSocketServer(QStringLiteral("Push Server"), QWebSocketServer::SecureMode, this)),
     m_pingTimer(new QTimer(this))
 {
+    QSslConfiguration sslConfiguration;
+    QFile certFile(QString::fromUtf8(GlobalConfig::CERT_FILE_PATH));
+    QFile keyFile(QString::fromUtf8(GlobalConfig::KEY_FILE_PATH));
+
+    if (certFile.open(QIODevice::ReadOnly) && keyFile.open(QIODevice::ReadOnly))
+    {
+        QSslCertificate certificate(&certFile, QSsl::Pem);
+        QSslKey sslKey(&keyFile, QSsl::Rsa, QSsl::Pem);
+        certFile.close();
+        keyFile.close();
+
+        sslConfiguration.setPeerVerifyMode(QSslSocket::VerifyNone);
+        sslConfiguration.setLocalCertificate(certificate);
+        sslConfiguration.setPrivateKey(sslKey);
+        sslConfiguration.setProtocol(QSsl::TlsV1_2OrLater);
+
+        m_pWebSocketServer->setSslConfiguration(sslConfiguration);
+    }
+    else
+        qDebug() << "CRITICAL: Cannot open SSL certificates!";
+
     if (m_pWebSocketServer->listen(QHostAddress::Any, port))
         qDebug() << "Server listening on port " << port;
 
@@ -35,9 +60,23 @@ void PushServer::sendPings()
         socket->ping();
 }
 
+void PushServer::onSslErrors(const QList<QSslError>& errors)
+{
+    for (const auto& error : errors)
+        qDebug() << "SSL Error:" << error.errorString();
+}
+
 void PushServer::onNewConnection()
 {
     QWebSocket* pSocket = m_pWebSocketServer->nextPendingConnection();
+
+    if (m_clients.size() >= GlobalConfig::MAX_CONNECTIONS)
+    {
+        qDebug() << "SECURITY: Server is full. Rejecting new connection.";
+        pSocket->close();
+        pSocket->deleteLater();
+        return;
+    }
 
     connect(pSocket, &QWebSocket::textMessageReceived, this, &PushServer::processIncomingMessage);
     connect(pSocket, &QWebSocket::disconnected, this, &PushServer::socketDisconnected);
