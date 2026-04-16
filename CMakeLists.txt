@@ -16,6 +16,8 @@ add_executable(WebSocketDaemon
   main.cpp
   GlobalSettings.h
   pushserver.h pushserver.cpp
+  logger.h
+  logger.cpp
 )
 
 target_link_libraries(WebSocketDaemon PRIVATE

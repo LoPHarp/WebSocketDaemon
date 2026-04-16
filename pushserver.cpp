@@ -22,28 +22,38 @@ PushServer::PushServer(quint16 port, QObject *parent) : QObject(parent),
     QFile certFile(QString::fromUtf8(GlobalConfig::CERT_FILE_PATH));
     QFile keyFile(QString::fromUtf8(GlobalConfig::KEY_FILE_PATH));
 
-    if (certFile.open(QIODevice::ReadOnly) && keyFile.open(QIODevice::ReadOnly))
+    if (!certFile.open(QIODevice::ReadOnly))
+        qCritical() << "Failed to open certificate (" << GlobalConfig::CERT_FILE_PATH << "). Reason:" << certFile.errorString();
+    else if (!keyFile.open(QIODevice::ReadOnly))
+    {
+        qCritical() << "Failed to open private key (" << GlobalConfig::KEY_FILE_PATH << "). Reason:" << keyFile.errorString();
+        certFile.close();
+    }
+    else
     {
         QSslCertificate certificate(&certFile, QSsl::Pem);
         QSslKey sslKey(&keyFile, QSsl::Rsa, QSsl::Pem);
         certFile.close();
         keyFile.close();
 
-        sslConfiguration.setPeerVerifyMode(QSslSocket::VerifyNone);
-        sslConfiguration.setLocalCertificate(certificate);
-        sslConfiguration.setPrivateKey(sslKey);
-        sslConfiguration.setProtocol(QSsl::TlsV1_2OrLater);
+        if (certificate.isNull() || sslKey.isNull())
+            qCritical() << "Files opened, but certificates are corrupted or invalid PEM format!";
+        else
+        {
+            sslConfiguration.setPeerVerifyMode(QSslSocket::VerifyNone);
+            sslConfiguration.setLocalCertificate(certificate);
+            sslConfiguration.setPrivateKey(sslKey);
+            sslConfiguration.setProtocol(QSsl::TlsV1_2OrLater);
 
-        m_pWebSocketServer->setSslConfiguration(sslConfiguration);
+            m_pWebSocketServer->setSslConfiguration(sslConfiguration);
+            qInfo() << "Certificates loaded securely.";
+        }
     }
-    else
-        qDebug() << "CRITICAL: Cannot open SSL certificates!";
-
     connect(m_pWebSocketServer, &QWebSocketServer::sslErrors, this, &PushServer::onSslErrors);
     */
 
     if (m_pWebSocketServer->listen(QHostAddress::Any, port))
-        qDebug() << "Server listening on port " << port;
+        qInfo() << "Server listening on port " << port;
 
     connect(m_pWebSocketServer, &QWebSocketServer::newConnection, this, &PushServer::onNewConnection);
 
@@ -69,7 +79,7 @@ void PushServer::sendPings()
 void PushServer::onSslErrors(const QList<QSslError>& errors)
 {
     for (const auto& error : errors)
-        qDebug() << "SSL Error:" << error.errorString();
+        qWarning() << "SSL Error:" << error.errorString();
 }
 
 void PushServer::onNewConnection()
@@ -82,7 +92,7 @@ void PushServer::onNewConnection()
 
     if (totalConnections >= GlobalConfig::MAX_CONNECTIONS)
     {
-        qDebug() << "SECURITY: Server is full. Rejecting new connection.";
+        qWarning() << "SECURITY: Server is full. Rejecting new connection.";
         pSocket->close();
         pSocket->deleteLater();
         return;
@@ -100,11 +110,14 @@ void PushServer::onNewConnection()
         m_clients[userIdStr].append(pSocket);
         pSocket->setProperty("userId", userIdStr);
 
-        qDebug() << "User/Role [" << userIdStr << "] connected! Total sockets for this role:" << m_clients[userIdStr].size();
+        pSocket->setProperty("msgCount", 0);
+        pSocket->setProperty("lastResetTime", QDateTime::currentMSecsSinceEpoch());
+
+        qInfo() << "User/Role [" << userIdStr << "] connected! Total sockets for this role:" << m_clients[userIdStr].size();
     }
     else
     {
-        qDebug() << "Connection rejected: No ID provided";
+        qWarning() << "Connection rejected: No ID provided";
         pSocket->close();
         pSocket->deleteLater();
     }
@@ -119,9 +132,30 @@ void PushServer::processIncomingMessage(const QString& message)
 
     if (message.length() > GlobalConfig::MAX_PAYLOAD_SIZE)
     {
-        qDebug() << "SECURITY ALERT: Payload too large from" << senderIdStr << ". Dropping connection.";
+        qWarning() << "SECURITY ALERT: Payload too large from" << senderIdStr << ". Dropping connection.";
         pSender->close();
         return;
+    }
+
+    qint64 currentTime = QDateTime::currentMSecsSinceEpoch();
+    qint64 lastResetTime = pSender->property("lastResetTime").toLongLong();
+    int msgCount = pSender->property("msgCount").toInt();
+
+    if (currentTime - lastResetTime > 1000)
+    {
+        pSender->setProperty("msgCount", 1);
+        pSender->setProperty("lastResetTime", currentTime);
+    }
+    else
+    {
+        msgCount++;
+        if (msgCount > GlobalConfig::MAX_MESSAGES_PER_SECOND)
+        {
+            qWarning() << "SECURITY ALERT: Rate limit exceeded by" << senderIdStr << "(Spam). Disconnecting.";
+            pSender->close();
+            return;
+        }
+        pSender->setProperty("msgCount", msgCount);
     }
 
     QJsonParseError parseError;
@@ -129,7 +163,7 @@ void PushServer::processIncomingMessage(const QString& message)
 
     if(parseError.error != QJsonParseError::NoError || !jsonDoc.isObject())
     {
-        qDebug() << "JSON Parse Error from" << senderIdStr << ":" << parseError.errorString();
+        qWarning() << "JSON Parse Error from" << senderIdStr << ":" << parseError.errorString();
         return;
     }
 
@@ -146,7 +180,7 @@ void PushServer::processIncomingMessage(const QString& message)
             QString targetUserOrRole = usersArray[i].toString();
             ServerPushToUserOrRole(targetUserOrRole, rawPayload);
         }
-        qDebug() << "Routed insert_zayavka from" << senderIdStr << "to" << usersArray.size() << "roles/users";
+        qInfo() << "Routed insert_zayavka from" << senderIdStr << "to" << usersArray.size() << "roles/users";
     }
     else if (action == "broadcast")
     {
@@ -154,7 +188,7 @@ void PushServer::processIncomingMessage(const QString& message)
         UserPushToAllUsers(senderIdStr, text);
     }
     else
-        qDebug() << "Unknown action received:" << action;
+        qWarning() << "Unknown action received:" << action;
 }
 
 void PushServer::ServerPushToUserOrRole(const QString& targetIdOrRole, const QString& message)
@@ -167,7 +201,6 @@ void PushServer::ServerPushToUserOrRole(const QString& targetIdOrRole, const QSt
 
 void PushServer::UserPushToAllUsers(const QString& senderId, const QString& message)
 {
-
     for (const auto& [role, socketList] : m_clients)
         for (QWebSocket* socket : socketList)
             if (socket->property("userId").toString() != senderId)
@@ -192,6 +225,6 @@ void PushServer::socketDisconnected()
         }
 
         pClient->deleteLater();
-        qDebug() << "Client [" << userIdStr << "] disconnected.";
+        qInfo() << "Client [" << userIdStr << "] disconnected.";
     }
 }
