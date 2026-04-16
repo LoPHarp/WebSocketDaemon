@@ -69,6 +69,24 @@ PushServer::~PushServer()
             socket->deleteLater();
 }
 
+void PushServer::shutdown()
+{
+    qInfo() << "Shutting down server gracefully...";
+
+    QJsonObject rebootObj;
+    rebootObj["action"] = "server_reboot";
+    rebootObj["message"] = "Server is restarting for maintenance. Please wait.";
+    QString msg = QJsonDocument(rebootObj).toJson(QJsonDocument::Compact);
+
+    for (auto& [role, socketList] : m_clients)
+        for (QWebSocket* socket : socketList)
+            socket->sendTextMessage(msg);
+
+    m_pWebSocketServer->close();
+
+    qInfo() << "Broadcasted reboot message to all clients. Exit.";
+}
+
 void PushServer::sendPings()
 {
     for (auto& [role, socketList] : m_clients)
@@ -184,8 +202,17 @@ void PushServer::processIncomingMessage(const QString& message)
     }
     else if (action == "broadcast")
     {
-        QString text = jsonObj["text"].toString();
-        UserPushToAllUsers(senderIdStr, text);
+        if (senderIdStr == "admin" || senderIdStr == "php_backend")
+        {
+            QString text = jsonObj["text"].toString();
+            UserPushToAllUsers(senderIdStr, text);
+            qInfo() << "ADMIN" << senderIdStr << "executed broadcast.";
+        }
+        else
+        {
+            qWarning() << "SECURITY ALERT: Unauthorized broadcast attempt from" << senderIdStr;
+            // pSender->close();
+        }
     }
     else
         qWarning() << "Unknown action received:" << action;

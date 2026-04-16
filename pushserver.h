@@ -14,6 +14,7 @@ class PushServer : public QObject
     Q_OBJECT
 public:
     explicit PushServer(quint16 port, QObject *parent = nullptr);
+    void shutdown();
     ~PushServer();
 
 private slots:

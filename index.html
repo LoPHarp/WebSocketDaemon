@@ -36,9 +36,23 @@
             document.getElementById("chat").innerHTML += "<p style='color: #ff3333;'>[System Error] З'єднання відхилено. Можливо, браузер блокує самопідписаний сертифікат WSS.</p>";
         };
 
+        ws.onclose = () => {
+            document.getElementById("chat").innerHTML += "<p style='color: #ff3333;'>[System] З'єднання закрито сервером.</p>";
+        };
+
         ws.onmessage = (event) => {
             const chat = document.getElementById("chat");
-            chat.innerHTML += "<p style='color: #ffcc00;'><b>Incoming:</b> " + event.data + "</p>";
+            try {
+                let parsedData = JSON.parse(event.data);
+                
+                if (parsedData.action === "server_reboot") {
+                    chat.innerHTML += "<p style='color: #ff6600; font-size: 18px; font-weight: bold;'>[SERVER WARNING]: " + parsedData.message + "</p>";
+                } else {
+                    chat.innerHTML += "<p style='color: #ffcc00;'><b>Incoming:</b> " + event.data + "</p>";
+                }
+            } catch (e) {
+                chat.innerHTML += "<p style='color: #ffcc00;'><b>Incoming:</b> " + event.data + "</p>";
+            }
             chat.scrollTop = chat.scrollHeight;
         };
 
