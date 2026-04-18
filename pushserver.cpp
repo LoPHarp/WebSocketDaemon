@@ -14,19 +14,18 @@
 using namespace std;
 
 PushServer::PushServer(quint16 port, QObject *parent) : QObject(parent),
-    m_pWebSocketServer(new QWebSocketServer(QStringLiteral("Push Server"), QWebSocketServer::NonSecureMode, this)), //Не забути повернути SecureMode
+    m_pWebSocketServer(new QWebSocketServer(QStringLiteral("Push Server"), QWebSocketServer::SecureMode, this)),
     m_pingTimer(new QTimer(this))
 {
-    /* ТИМЧАСОВО ВІДКЛЮЧЕНО ДЛЯ ЛОКАЛЬНОГО ТЕСТУВАННЯ
     QSslConfiguration sslConfiguration;
-    QFile certFile(QString::fromUtf8(GlobalConfig::CERT_FILE_PATH));
-    QFile keyFile(QString::fromUtf8(GlobalConfig::KEY_FILE_PATH));
+    QFile certFile(QString::fromStdString(GlobalConfig::CERT_FILE_PATH));
+    QFile keyFile(QString::fromStdString(GlobalConfig::KEY_FILE_PATH));
 
     if (!certFile.open(QIODevice::ReadOnly))
-        qCritical() << "Failed to open certificate (" << GlobalConfig::CERT_FILE_PATH << "). Reason:" << certFile.errorString();
+        qCritical() << "Failed to open certificate (" << GlobalConfig::CERT_FILE_PATH.c_str() << "). Reason:" << certFile.errorString();
     else if (!keyFile.open(QIODevice::ReadOnly))
     {
-        qCritical() << "Failed to open private key (" << GlobalConfig::KEY_FILE_PATH << "). Reason:" << keyFile.errorString();
+        qCritical() << "Failed to open private key (" << GlobalConfig::KEY_FILE_PATH.c_str() << "). Reason:" << keyFile.errorString();
         certFile.close();
     }
     else
@@ -46,11 +45,10 @@ PushServer::PushServer(quint16 port, QObject *parent) : QObject(parent),
             sslConfiguration.setProtocol(QSsl::TlsV1_2OrLater);
 
             m_pWebSocketServer->setSslConfiguration(sslConfiguration);
-            qInfo() << "Certificates loaded securely.";
+            qInfo() << "Certificates loaded securely from config.";
         }
     }
     connect(m_pWebSocketServer, &QWebSocketServer::sslErrors, this, &PushServer::onSslErrors);
-    */
 
     if (m_pWebSocketServer->listen(QHostAddress::Any, port))
         qInfo() << "Server listening on port " << port;

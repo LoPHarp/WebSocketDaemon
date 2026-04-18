@@ -18,6 +18,8 @@ add_executable(WebSocketDaemon
   pushserver.h pushserver.cpp
   logger.h
   logger.cpp
+  configmanager.h
+  configmanager.cpp
 )
 
 target_link_libraries(WebSocketDaemon PRIVATE

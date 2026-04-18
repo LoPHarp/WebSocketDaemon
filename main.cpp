@@ -1,10 +1,10 @@
 #include <QCoreApplication>
+#include <csignal>
 
 #include "pushserver.h"
 #include "GlobalSettings.h"
 #include "logger.h"
-
-#include <csignal>
+#include "configmanager.h"
 
 using namespace std;
 
@@ -22,10 +22,17 @@ void signalHandler(int sig)
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
+    QCoreApplication::setApplicationName("WebSocketDaemon");
 
     Logger::setup();
 
+    if (!ConfigManager::parseSslPaths(a))
+    {
+        return 1;
+    }
+
     PushServer server(GlobalConfig::DEFAULT_PORT);
+    globalServerPtr = &server;
 
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);

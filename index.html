@@ -26,7 +26,7 @@
         let myRole = prompt("Введіть ваш Нік або Роль (напр. dispetcher_):", "dispetcher_");
         document.getElementById("header").innerText = "WSS Client (Роль: " + myRole + ")";
 
-        const ws = new WebSocket("ws://127.0.0.1:8080/?id=" + myRole);
+        const ws = new WebSocket("ws://172.21.208.235:8080/?id=" + myRole);
 
         ws.onopen = () => {
             document.getElementById("chat").innerHTML += "<p style='color: #4CAF50;'>[System] Securely Connected to C++ Server!</p>";
