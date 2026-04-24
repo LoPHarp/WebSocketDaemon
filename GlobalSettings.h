@@ -17,6 +17,9 @@ namespace GlobalConfig
     inline std::string CERT_FILE_PATH = "fullchain.pem";
     inline std::string KEY_FILE_PATH = "privkey.pem";
 
+    inline std::string PHP_API_ENDPOINT = "http://127.0.0.1/api/endpoint.php";  // Ендпоінт
+    constexpr int HTTP_TIMEOUT_MS = 5000;       // Час очікування віповіді від PHP серверу, про отримання данних (мс)
+
     // НАЛАШТУВАННЯ ЛОГЕРА
     constexpr bool ENABLE_FILE_LOGGING = false;             // Писати у файл чи ні?
     constexpr const char* LOG_FILE_PATH = "server.log";     // Назва файлу логів

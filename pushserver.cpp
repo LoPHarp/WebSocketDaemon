@@ -15,7 +15,8 @@ using namespace std;
 
 PushServer::PushServer(quint16 port, QObject *parent) : QObject(parent),
     m_pWebSocketServer(new QWebSocketServer(QStringLiteral("Push Server"), QWebSocketServer::SecureMode, this)),
-    m_pingTimer(new QTimer(this))
+    m_pingTimer(new QTimer(this)),
+    m_networkManager(new QNetworkAccessManager(this))
 {
     QSslConfiguration sslConfiguration;
     QFile certFile(QString::fromStdString(GlobalConfig::CERT_FILE_PATH));
@@ -190,13 +191,7 @@ void PushServer::processIncomingMessage(const QString& message)
     {
         QString rawPayload = QString::fromUtf8(jsonDoc.toJson(QJsonDocument::Compact));
         QJsonArray usersArray = jsonObj["user"].toArray();
-
-        for (int i = 0; i < usersArray.size(); ++i)
-        {
-            QString targetUserOrRole = usersArray[i].toString();
-            ServerPushToUserOrRole(targetUserOrRole, rawPayload);
-        }
-        qInfo() << "Routed insert_zayavka from" << senderIdStr << "to" << usersArray.size() << "roles/users";
+        forwardToPhpAndBroadcast(senderIdStr, jsonObj, usersArray, rawPayload);
     }
     else if (action == "broadcast")
     {
@@ -252,4 +247,36 @@ void PushServer::socketDisconnected()
         pClient->deleteLater();
         qInfo() << "Client [" << userIdStr << "] disconnected.";
     }
+}
+
+void PushServer::forwardToPhpAndBroadcast(const QString& senderIdStr, const QJsonObject& jsonObj, const QJsonArray& targetRoles, const QString& rawPayload)
+{
+    QUrl url(QString::fromStdString(GlobalConfig::PHP_API_ENDPOINT));
+
+    if (!url.isValid())
+    {
+        qCritical() << "CRITICAL: PHP API Endpoint URL is invalid ->" << GlobalConfig::PHP_API_ENDPOINT.c_str();
+        return;
+    }
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setTransferTimeout(GlobalConfig::HTTP_TIMEOUT_MS);
+
+    QByteArray data = QJsonDocument(jsonObj).toJson(QJsonDocument::Compact);
+    QNetworkReply* reply = m_networkManager->post(request, data);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, targetRoles, rawPayload, senderIdStr]()
+            {
+                if (reply->error() == QNetworkReply::NoError)
+                {
+                    qInfo() << "PHP DB SUCCESS. Routing insert_zayavka from" << senderIdStr;
+                    for (int i = 0; i < targetRoles.size(); ++i)
+                        ServerPushToUserOrRole(targetRoles[i].toString(), rawPayload);
+                }
+                else
+                    qWarning() << "PHP DB ERROR for" << senderIdStr << ":" << reply->errorString();
+
+                reply->deleteLater();
+            });
 }
