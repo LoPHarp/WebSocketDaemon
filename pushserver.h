@@ -27,11 +27,10 @@ private slots:
     void processIncomingMessage(const QString& message);
     void socketDisconnected();
 
-
 private:
-    void UserPushToAllUsers(const QString& senderId, const QString& message);
-    void ServerPushToUserOrRole(const QString& targetIdOrRole, const QString& message);
-    void forwardToPhpAndBroadcast(const QString& senderIdStr, const QJsonObject& jsonObj, const QJsonArray& targetRoles, const QString& rawPayload);
+    void UserPushToAllUsers(const QString& senderId, const QString& message, int senderFactoryId, int senderSubfactoryId);
+    void ServerPushToUserOrRole(const QString& targetIdOrRole, const QString& message, int senderFactoryId, int senderSubfactoryId);
+    void forwardToPhpAndBroadcast(const QString& senderIdStr, int senderFactoryId, int senderSubfactoryId, const QJsonObject& jsonObj, const QJsonArray& targetRoles, const QString& rawPayload);
 
     QWebSocketServer* m_pWebSocketServer;
     std::unordered_map<QString, QList<QWebSocket*>> m_clients;

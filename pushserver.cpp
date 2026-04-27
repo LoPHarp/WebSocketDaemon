@@ -101,43 +101,77 @@ void PushServer::onSslErrors(const QList<QSslError>& errors)
 
 void PushServer::onNewConnection()
 {
-    int totalConnections = 0;
-    for (const auto& [role, socketList] : m_clients)
-        totalConnections += socketList.size();
+    QWebSocket *pSocket = m_pWebSocketServer->nextPendingConnection();
 
-    QWebSocket* pSocket = m_pWebSocketServer->nextPendingConnection();
+    QUrl url = pSocket->requestUrl();
+    QUrlQuery query(url);
+    QString tokenParam = QString::fromStdString(GlobalConfig::HTTP_TOKEN_PARAM);
+    QString token = query.queryItemValue(tokenParam);
 
-    if (totalConnections >= GlobalConfig::MAX_CONNECTIONS)
+    if (token.isEmpty())
     {
-        qWarning() << "SECURITY: Server is full. Rejecting new connection.";
-        pSocket->close();
+        qWarning() << "Connection rejected: No token provided.";
+        pSocket->close(QWebSocketProtocol::CloseCodePolicyViolated, "Token missing");
         pSocket->deleteLater();
         return;
     }
 
-    connect(pSocket, &QWebSocket::textMessageReceived, this, &PushServer::processIncomingMessage);
-    connect(pSocket, &QWebSocket::disconnected, this, &PushServer::socketDisconnected);
+    qInfo() << "New handshake request with token:" << token;
 
-    QUrl url = pSocket->requestUrl();
-    QUrlQuery query(url);
-    QString userIdStr = query.queryItemValue("id");
+    QUrl authUrl(QString::fromStdString(GlobalConfig::PHP_AUTH_URL));
+    QUrlQuery authQuery;
+    authQuery.addQueryItem(tokenParam, token);
+    authUrl.setQuery(authQuery);
 
-    if (!userIdStr.isEmpty())
-    {
-        m_clients[userIdStr].append(pSocket);
-        pSocket->setProperty("userId", userIdStr);
+    QNetworkRequest request(authUrl);
+    request.setTransferTimeout(GlobalConfig::HTTP_TIMEOUT_MS);
 
-        pSocket->setProperty("msgCount", 0);
-        pSocket->setProperty("lastResetTime", QDateTime::currentMSecsSinceEpoch());
+    QNetworkReply* reply = m_networkManager->get(request);
 
-        qInfo() << "User/Role [" << userIdStr << "] connected! Total sockets for this role:" << m_clients[userIdStr].size();
-    }
-    else
-    {
-        qWarning() << "Connection rejected: No ID provided";
-        pSocket->close();
-        pSocket->deleteLater();
-    }
+    connect(reply, &QNetworkReply::finished, this, [this, reply, pSocket, token]()
+            {
+                if (reply->error() == QNetworkReply::NoError)
+                {
+                    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+                    QJsonObject obj = doc.object();
+
+                    QString status = obj[QString::fromStdString(GlobalConfig::JSON_AUTH_STATUS_KEY)].toString();
+
+                    if (status == "ok")
+                    {
+                        QString role = obj[QString::fromStdString(GlobalConfig::JSON_AUTH_ROLE_KEY)].toString();
+                        int factoryId = obj[QString::fromStdString(GlobalConfig::JSON_AUTH_FACTORY_KEY)].toInt();
+                        int subfactoryId = obj[QString::fromStdString(GlobalConfig::JSON_AUTH_SUB_KEY)].toInt();
+                        QString userName = obj[QString::fromStdString(GlobalConfig::JSON_AUTH_NAME_KEY)].toString();
+
+                        pSocket->setProperty("userId", token);
+                        pSocket->setProperty("role", role);
+                        pSocket->setProperty("factoryId", factoryId);
+                        pSocket->setProperty("subfactoryId", subfactoryId);
+
+                        m_clients[role].append(pSocket);
+
+                        connect(pSocket, &QWebSocket::textMessageReceived, this, &PushServer::processIncomingMessage);
+                        connect(pSocket, &QWebSocket::disconnected, this, &PushServer::socketDisconnected);
+
+                        qInfo() << "User" << userName << "(" << role << ") authorized for factory" << factoryId;
+                    }
+                    else
+                    {
+                        qWarning() << "PHP rejected token:" << token;
+                        pSocket->close(QWebSocketProtocol::CloseCodePolicyViolated, "Invalid token");
+                        pSocket->deleteLater();
+                    }
+                }
+                else
+                {
+                    qCritical() << "Auth error (PHP unreachable):" << reply->errorString();
+                    pSocket->close(QWebSocketProtocol::CloseCodeBadOperation, "Auth service unavailable");
+                    pSocket->deleteLater();
+                }
+
+                reply->deleteLater();
+            });
 }
 
 void PushServer::processIncomingMessage(const QString& message)
@@ -146,6 +180,8 @@ void PushServer::processIncomingMessage(const QString& message)
     if (!pSender) return;
 
     QString senderIdStr = pSender->property("userId").toString();
+    int senderFactoryId = pSender->property("factoryId").toInt();
+    int senderSubfactoryId = pSender->property("subfactoryId").toInt();
 
     if (message.length() > GlobalConfig::MAX_PAYLOAD_SIZE)
     {
@@ -177,105 +213,169 @@ void PushServer::processIncomingMessage(const QString& message)
 
     QJsonParseError parseError;
     QJsonDocument jsonDoc = QJsonDocument::fromJson(message.toUtf8(), &parseError);
-
-    if(parseError.error != QJsonParseError::NoError || !jsonDoc.isObject())
-    {
-        qWarning() << "JSON Parse Error from" << senderIdStr << ":" << parseError.errorString();
+    if (parseError.error != QJsonParseError::NoError) {
+        qWarning() << "Invalid JSON from" << senderIdStr << ":" << parseError.errorString();
         return;
     }
 
     QJsonObject jsonObj = jsonDoc.object();
-    QString action = jsonObj["action"].toString();
+    QString action = jsonObj[QString::fromStdString(GlobalConfig::JSON_ACTION_KEY)].toString();
 
-    if (action == "insert_zayavka")
+    if (senderIdStr == QString::fromStdString(GlobalConfig::ROLE_PHP_BACKEND) || senderFactoryId == 0)
+    {
+        QString factoryKey = QString::fromStdString(GlobalConfig::JSON_FACTORY_KEY);
+        QString subfactoryKey = QString::fromStdString(GlobalConfig::JSON_SUBFACTORY_KEY);
+
+        if (jsonObj.contains(factoryKey))
+            senderFactoryId = jsonObj[factoryKey].toInt();
+
+        if (jsonObj.contains(subfactoryKey))
+            senderSubfactoryId = jsonObj[subfactoryKey].toInt();
+    }
+
+    if (action == QString::fromStdString(GlobalConfig::ACTION_INSERT_ZAYAVKA))
     {
         QString rawPayload = QString::fromUtf8(jsonDoc.toJson(QJsonDocument::Compact));
-        QJsonArray usersArray = jsonObj["user"].toArray();
-        forwardToPhpAndBroadcast(senderIdStr, jsonObj, usersArray, rawPayload);
+        QJsonArray usersArray = jsonObj[QString::fromStdString(GlobalConfig::JSON_USER_KEY)].toArray();
+
+        forwardToPhpAndBroadcast(senderIdStr, senderFactoryId, senderSubfactoryId, jsonObj, usersArray, rawPayload);
     }
-    else if (action == "broadcast")
+    else if (action == QString::fromStdString(GlobalConfig::ACTION_BROADCAST))
     {
-        if (senderIdStr == "admin" || senderIdStr == "php_backend")
+        if (senderIdStr == QString::fromStdString(GlobalConfig::ROLE_ADMIN) || senderIdStr == QString::fromStdString(GlobalConfig::ROLE_PHP_BACKEND))
         {
-            QString text = jsonObj["text"].toString();
-            UserPushToAllUsers(senderIdStr, text);
-            qInfo() << "ADMIN" << senderIdStr << "executed broadcast.";
+            QString text = jsonObj[QString::fromStdString(GlobalConfig::JSON_TEXT_KEY)].toString();
+            UserPushToAllUsers(senderIdStr, text, senderFactoryId, senderSubfactoryId);
+            qInfo() << "ADMIN" << senderIdStr << "executed broadcast for factory" << senderFactoryId;
         }
         else
         {
             qWarning() << "SECURITY ALERT: Unauthorized broadcast attempt from" << senderIdStr;
-            // pSender->close();
+            pSender->close(QWebSocketProtocol::CloseCodePolicyViolated, "Unauthorized action");
         }
     }
     else
         qWarning() << "Unknown action received:" << action;
 }
 
-void PushServer::ServerPushToUserOrRole(const QString& targetIdOrRole, const QString& message)
+void PushServer::ServerPushToUserOrRole(const QString& targetIdOrRole, const QString& message, int senderFactoryId, int senderSubfactoryId)
 {
     auto it = m_clients.find(targetIdOrRole);
     if (it != m_clients.end())
-        for (QWebSocket* socket : it->second)
-            socket->sendTextMessage(message);
+    {
+        for (QWebSocket* pReceiver : it->second)
+        {
+            int receiverFactoryId = pReceiver->property("factoryId").toInt();
+            int receiverSubfactoryId = pReceiver->property("subfactoryId").toInt();
+
+            if (senderFactoryId != 0 && senderFactoryId != receiverFactoryId)
+                continue;
+
+            if (senderSubfactoryId != 0 && receiverSubfactoryId != 0 && senderSubfactoryId != receiverSubfactoryId)
+                continue;
+
+            pReceiver->sendTextMessage(message);
+        }
+    }
 }
 
-void PushServer::UserPushToAllUsers(const QString& senderId, const QString& message)
+void PushServer::UserPushToAllUsers(const QString& senderId, const QString& message, int senderFactoryId, int senderSubfactoryId)
 {
     for (const auto& [role, socketList] : m_clients)
-        for (QWebSocket* socket : socketList)
-            if (socket->property("userId").toString() != senderId)
-                socket->sendTextMessage("User " + senderId + " says: " + message);
+    {
+        for (QWebSocket* pReceiver : socketList)
+        {
+            if (pReceiver->property("userId").toString() == senderId)
+                continue;
+
+            int receiverFactoryId = pReceiver->property("factoryId").toInt();
+            int receiverSubfactoryId = pReceiver->property("subfactoryId").toInt();
+
+            if (senderFactoryId != 0 && senderFactoryId != receiverFactoryId)
+                continue;
+
+            if (senderSubfactoryId != 0 && receiverSubfactoryId != 0 && senderSubfactoryId != receiverSubfactoryId)
+                continue;
+
+            pReceiver->sendTextMessage("User " + senderId + " says: " + message);
+        }
+    }
 }
 
 void PushServer::socketDisconnected()
 {
-    QWebSocket* pClient = qobject_cast<QWebSocket*>(sender());
-
+    QWebSocket *pClient = qobject_cast<QWebSocket *>(sender());
     if (pClient)
     {
-        QString userIdStr = pClient->property("userId").toString();
+        QString userId = pClient->property("userId").toString();
 
-        auto it = m_clients.find(userIdStr);
-        if (it != m_clients.end())
+        if (!userId.isEmpty())
         {
-            it->second.removeAll(pClient);
+            QUrl url(QString::fromStdString(GlobalConfig::PHP_DISCONNECT_URL));
+            if (url.isValid())
+            {
+                QNetworkRequest request(url);
+                request.setHeader(QNetworkRequest::ContentTypeHeader, QString::fromStdString(GlobalConfig::HTTP_CONTENT_TYPE_VAL));
+                request.setTransferTimeout(GlobalConfig::HTTP_TIMEOUT_MS);
 
-            if (it->second.isEmpty())
-                m_clients.erase(it);
+                QJsonObject jsonObj;
+                jsonObj[QString::fromStdString(GlobalConfig::JSON_DISCONNECT_TOKEN_KEY)] = userId;
+
+                QByteArray data = QJsonDocument(jsonObj).toJson(QJsonDocument::Compact);
+
+                QNetworkReply* reply = m_networkManager->post(request, data);
+
+                connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+
+                qInfo() << "Sent disconnect notification to PHP for user:" << userId;
+            }
+        }
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it->second.contains(pClient))
+            {
+                it->second.removeAll(pClient);
+                if (it->second.isEmpty())
+                    m_clients.erase(it);
+                break;
+            }
         }
 
         pClient->deleteLater();
-        qInfo() << "Client [" << userIdStr << "] disconnected.";
     }
 }
 
-void PushServer::forwardToPhpAndBroadcast(const QString& senderIdStr, const QJsonObject& jsonObj, const QJsonArray& targetRoles, const QString& rawPayload)
+void PushServer::forwardToPhpAndBroadcast(const QString& senderIdStr, int senderFactoryId, int senderSubfactoryId, const QJsonObject& jsonObj, const QJsonArray& targetRoles, const QString& rawPayload)
 {
-    QUrl url(QString::fromStdString(GlobalConfig::PHP_API_ENDPOINT));
+    QUrl url(QString::fromStdString(GlobalConfig::PHP_SAVE_URL));
 
     if (!url.isValid())
     {
-        qCritical() << "CRITICAL: PHP API Endpoint URL is invalid ->" << GlobalConfig::PHP_API_ENDPOINT.c_str();
+        qCritical() << "Invalid SAVE_URL in config! ( " << GlobalConfig::PHP_SAVE_URL.c_str() << " )";
         return;
     }
 
     QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QString::fromStdString(GlobalConfig::HTTP_CONTENT_TYPE_VAL));
     request.setTransferTimeout(GlobalConfig::HTTP_TIMEOUT_MS);
 
     QByteArray data = QJsonDocument(jsonObj).toJson(QJsonDocument::Compact);
     QNetworkReply* reply = m_networkManager->post(request, data);
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, targetRoles, rawPayload, senderIdStr]()
+    connect(reply, &QNetworkReply::finished, this, [this, reply, targetRoles, rawPayload, senderIdStr, senderFactoryId, senderSubfactoryId]()
             {
                 if (reply->error() == QNetworkReply::NoError)
                 {
                     qInfo() << "PHP DB SUCCESS. Routing insert_zayavka from" << senderIdStr;
                     for (int i = 0; i < targetRoles.size(); ++i)
-                        ServerPushToUserOrRole(targetRoles[i].toString(), rawPayload);
+                        ServerPushToUserOrRole(targetRoles[i].toString(), rawPayload, senderFactoryId, senderSubfactoryId);
                 }
                 else
+                {
                     qWarning() << "PHP DB ERROR for" << senderIdStr << ":" << reply->errorString();
+                    qDebug() << "Response body:" << reply->readAll();
+                }
 
                 reply->deleteLater();
             });
