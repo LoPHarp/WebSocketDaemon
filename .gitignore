@@ -39,6 +39,7 @@ compile_commands.json
 # User-specific files
 all_in_one.txt
 build_linux/
+test_env/
 
 # VS Code specific
 .vs/
