@@ -24,12 +24,12 @@ int main(int argc, char *argv[])
     QCoreApplication a(argc, argv);
     QCoreApplication::setApplicationName("WebSocketDaemon");
 
+    if (!ConfigManager::loadExternalConfig())
+        return 1;
+
     Logger::setup();
 
-    if (!ConfigManager::parseSslPaths(a))
-    {
-        return 1;
-    }
+    ConfigManager::printCurrentConfig();
 
     PushServer server(GlobalConfig::DEFAULT_PORT);
     globalServerPtr = &server;

@@ -1,12 +1,13 @@
 #ifndef CONFIGMANAGER_H
 #define CONFIGMANAGER_H
 
-#include <QCoreApplication>
+#include <QString>
 
 class ConfigManager
 {
 public:
-    static bool parseSslPaths(const QCoreApplication& app);
+    static bool loadExternalConfig(const QString& path = "config.json");
+    static void printCurrentConfig()
 };
 
 #endif // CONFIGMANAGER_H

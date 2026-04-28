@@ -44,7 +44,7 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
 
     if (GlobalConfig::ENABLE_FILE_LOGGING)
     {
-        QFile outFile(QString::fromUtf8(GlobalConfig::LOG_FILE_PATH));
+        QFile outFile(QString::fromStdString(GlobalConfig::LOG_FILE_PATH));
         if (outFile.open(QIODevice::WriteOnly | QIODevice::Append))
         {
             QTextStream ts(&outFile);

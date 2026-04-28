@@ -1,0 +1,40 @@
+{
+  "port": 8080,
+  "max_connections": 1000,
+  "max_payload_size": 8192,
+  "max_messages_per_second": 5,
+  "ping_interval_ms": 30000,
+  
+  "ssl_cert_path": "fullchain.pem",
+  "ssl_key_path": "privkey.pem",
+  
+  "php_auth_url": "http://127.0.0.1/api/auth.php",
+  "php_save_url": "http://127.0.0.1/api/save.php",
+  "php_disconnect_url": "http://127.0.0.1/api/disconnect.php",
+  "http_timeout_ms": 5000,
+  
+  "http_content_type_val": "application/json",
+  "http_token_param": "token",
+  
+  "json_action_key": "action",
+  "json_user_key": "user",
+  "json_text_key": "content",
+  "json_factory_key": "id_factory",
+  "json_subfactory_key": "id_subfactory",
+  "json_disconnect_token_key": "token",
+  
+  "json_auth_status_key": "status",
+  "json_auth_role_key": "role",
+  "json_auth_factory_key": "factory_id",
+  "json_auth_sub_key": "subfactory_id",
+  "json_auth_name_key": "name",
+  
+  "action_insert_zayavka": "insert_zayavka",
+  "action_broadcast": "broadcast",
+  
+  "role_php_backend": "php_backend",
+  "role_admin": "admin",
+  
+  "enable_file_logging": false,
+  "log_file_path": "server.log"
+}
